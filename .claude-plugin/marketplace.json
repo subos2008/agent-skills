@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "agent-skills",
-      "source": ".",
+      "source": "./",
       "description": "Personal Claude Code skills: spa-aws-deploy and more.",
       "version": "0.1.0",
       "category": "development"
