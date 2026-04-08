@@ -14,15 +14,18 @@ In any Claude Code session:
 
 ```
 /plugin marketplace add subos2008/agent-skills
-/plugin install agent-skills@agent-skills
+/plugin install subos2008-skills@subos2008-skills
 ```
 
 That's it. All skills in `skills/` are auto-loaded by Claude.
 
+(The repo is named `agent-skills` but the marketplace and plugin are named
+`subos2008-skills` because Claude reserves `agent-skills` for Anthropic.)
+
 To update later, after pushing changes:
 
 ```
-/plugin marketplace update agent-skills
+/plugin marketplace update subos2008-skills
 ```
 
 ### Private clone (machines with SSH keys configured)

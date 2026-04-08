@@ -1,13 +1,13 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "agent-skills",
+  "name": "subos2008-skills",
   "description": "subos2008's personal Claude Code skills collection",
   "owner": {
     "name": "subos2008"
   },
   "plugins": [
     {
-      "name": "agent-skills",
+      "name": "subos2008-skills",
       "source": "./",
       "description": "Personal Claude Code skills: spa-aws-deploy and more.",
       "version": "0.1.0",

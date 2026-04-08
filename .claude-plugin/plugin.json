@@ -1,5 +1,5 @@
 {
-  "name": "agent-skills",
+  "name": "subos2008-skills",
   "description": "Personal collection of Claude Code skills. Currently includes: spa-aws-deploy (set up AWS hosting infrastructure for React/Vite SPAs with Supabase).",
   "version": "0.1.0",
   "author": {
