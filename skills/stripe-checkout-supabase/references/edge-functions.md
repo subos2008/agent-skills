@@ -29,18 +29,20 @@ const JWKS = jose.createRemoteJWKSet(
 )
 
 // Stripe Price IDs — NOT secrets. Hardcoded here so the price catalog lives
-// in version control. Populate each entry after creating prices in Stripe.
+// in version control. Phase 2 (environment provisioning) replaces these
+// sentinels with real price IDs from Stripe. If you see a Stripe API error
+// like "No such price: price_TODO_test_1m", it means Phase 2 hasn't been run.
 // Key structure: PRICES[env][plan_slug] = 'price_xxx'
 const PRICES: Record<string, Record<string, string>> = {
   test: {
-    '1m': 'price_TEST_1m_PLACEHOLDER',
-    '3m': 'price_TEST_3m_PLACEHOLDER',
-    '6m': 'price_TEST_6m_PLACEHOLDER',
+    '1m': 'price_TODO_test_1m',
+    '3m': 'price_TODO_test_3m',
+    '6m': 'price_TODO_test_6m',
   },
   live: {
-    '1m': 'price_LIVE_1m_PLACEHOLDER',
-    '3m': 'price_LIVE_3m_PLACEHOLDER',
-    '6m': 'price_LIVE_6m_PLACEHOLDER',
+    '1m': 'price_TODO_live_1m',
+    '3m': 'price_TODO_live_3m',
+    '6m': 'price_TODO_live_6m',
   },
 }
 
