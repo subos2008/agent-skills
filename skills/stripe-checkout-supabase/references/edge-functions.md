@@ -10,7 +10,7 @@ Creates a Stripe Checkout session for a subscription. Verifies the caller's Supa
 
 ```typescript
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
-import Stripe from 'https://esm.sh/stripe@14.14.0?target=deno'
+import Stripe from 'https://esm.sh/stripe@22.0.1?target=deno'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.99.1'
 import * as jose from 'jsr:@panva/jose@6'
 import { initTracing, traced, withSpan, currentTraceId } from '../_shared/tracing.ts'
@@ -101,7 +101,7 @@ serve(async (req) => {
 
       const stripeEnv = stripeSecretKey.startsWith('sk_live_') ? 'live' : 'test'
       const stripe = new Stripe(stripeSecretKey, {
-        apiVersion: '2026-03-25',
+        apiVersion: '2026-03-25.dahlia',
         httpClient: Stripe.createFetchHttpClient(),
       })
 
@@ -216,7 +216,7 @@ Receives webhook events from Stripe. Two event types matter: `checkout.session.c
 
 ```typescript
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
-import Stripe from 'https://esm.sh/stripe@14.14.0?target=deno'
+import Stripe from 'https://esm.sh/stripe@22.0.1?target=deno'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.99.1'
 import { initTracing, traced, withSpan } from '../_shared/tracing.ts'
 import { initSentry, Sentry } from '../_shared/sentry.ts'
@@ -237,7 +237,7 @@ serve(async (req) => {
       }
 
       const stripe = new Stripe(stripeSecretKey, {
-        apiVersion: '2026-03-25',
+        apiVersion: '2026-03-25.dahlia',
         httpClient: Stripe.createFetchHttpClient(),
       })
       const supabase = createClient(supabaseUrl, supabaseServiceRoleKey)
@@ -373,7 +373,7 @@ Opens a Stripe billing portal session for an existing customer. This is how subs
 
 ```typescript
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
-import Stripe from 'https://esm.sh/stripe@14.14.0?target=deno'
+import Stripe from 'https://esm.sh/stripe@22.0.1?target=deno'
 import * as jose from 'jsr:@panva/jose@6'
 import { initTracing, traced, withSpan } from '../_shared/tracing.ts'
 import { initSentry, Sentry } from '../_shared/sentry.ts'
@@ -432,7 +432,7 @@ serve(async (req) => {
       }
 
       const stripe = new Stripe(stripeSecretKey, {
-        apiVersion: '2026-03-25',
+        apiVersion: '2026-03-25.dahlia',
         httpClient: Stripe.createFetchHttpClient(),
       })
 
