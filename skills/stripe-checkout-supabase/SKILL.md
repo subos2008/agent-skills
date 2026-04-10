@@ -144,14 +144,16 @@ Read `references/setup-checklist.md` for the full interactive flow. This step us
 
 **Phase 2 is independent of Phase 1** — it can run immediately after code generation, or later when the user has their Stripe keys ready. It can also be re-run to add new environments or rotate secrets.
 
-Summary of what Phase 2 does:
+Phase 2 works per-environment. It asks what environments you have (could be just production, or staging + production, etc.), then for each one:
 
-1. Collects Stripe secret keys (test + live) and Supabase project refs for each environment
-2. Creates products and prices in both test and live modes via `stripe products create` / `stripe prices create`
+1. Collects the Stripe secret key and Supabase project details for that environment
+2. Creates products and prices via `stripe products create` / `stripe prices create`
 3. Replaces `price_TODO_*` sentinels in `create-checkout/index.ts` with real price IDs
-4. Creates webhook endpoints via `stripe webhook_endpoints create` for each environment
+4. Creates a webhook endpoint via `stripe webhook_endpoints create`
 5. Sets Supabase edge function secrets via `npx supabase secrets set`
-6. Optionally guides RAK hardening (manual dashboard step — Stripe doesn't support programmatic RAK creation)
+6. Runs the smoke test checklist before moving to the next environment
+
+For subsequent environments, it mirrors the product/price structure from the first to prevent drift.
 
 For each batch of CLI commands, ask the user: "Want me to run these, or would you prefer to run them yourself?"
 

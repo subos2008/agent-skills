@@ -6,74 +6,65 @@ For each batch of commands below, present them to the user and ask: "Want me to 
 
 Never write secrets to files or log them.
 
-## Step 2.1 — Collect credentials
+## Step 2.1 — Identify environments
 
-Ask the user for:
+Ask the user what environments they have. Common setups:
 
-1. **Stripe test secret key** (`sk_test_...`) — from Stripe Dashboard → Developers → API keys (test mode)
-2. **Stripe live secret key** (`sk_live_...`) — same page, live mode toggle
-3. **Environments** — for each environment (typically staging + production):
-   - Supabase project ref (e.g., `abcdefghij`)
-   - Subscriber app URL (e.g., `https://subscribers.stg.myapp.com`)
-   - Onboarding app URL (e.g., `https://onboarding.stg.myapp.com`)
-4. **Environment-to-Stripe-mode mapping** — typically:
-   - Staging → test mode (`sk_test_`)
-   - Production → live mode (`sk_live_`)
+- **Single environment** — just production (Stripe live mode, one Supabase project)
+- **Two environments** — staging (Stripe test mode) + production (Stripe live mode)
+- **Three environments** — dev + staging + production
+
+For each environment, collect:
+
+1. **Environment name** (e.g., "production", "staging")
+2. **Stripe mode** — test or live. Typically: staging → test, production → live
+3. **Stripe secret key** for that mode (`sk_test_...` or `sk_live_...`) — from Stripe Dashboard → Developers → API keys
+4. **Supabase project ref** (e.g., `abcdefghij`)
+5. **Subscriber app URL** (e.g., `https://subscribers.myapp.com`)
+6. **Onboarding app URL** (e.g., `https://onboarding.myapp.com`)
+
+Then run Steps 2.2–2.5 **for each environment in sequence**, completing one fully before starting the next.
 
 ## Step 2.2 — Create products and prices
 
 Read the `PRICES` map from the generated `create-checkout/index.ts` to determine plan slugs. On a fresh run (sentinels present), create all products and prices. On a re-run (real IDs already present), ask the user whether to create new products/prices or keep existing ones.
 
-Create identical products and prices in both test and live modes in a single pass:
+**If this is the first environment being provisioned**, create the product and prices:
 
 ```bash
-# Test mode — create product
 stripe products create \
   --name "PRODUCT_NAME" \
-  --api-key sk_test_...
+  --api-key SK_FOR_THIS_ENV
 
-# Test mode — create prices (one per plan slug)
+# One command per plan slug:
 stripe prices create \
-  --product prod_RETURNED_TEST_ID \
+  --product prod_RETURNED_ID \
   --unit-amount AMOUNT_IN_CENTS \
   --currency CURRENCY \
   -d "recurring[interval]=INTERVAL" \
-  --api-key sk_test_...
-
-# Live mode — create identical product
-stripe products create \
-  --name "PRODUCT_NAME" \
-  --api-key sk_live_...
-
-# Live mode — create identical prices
-stripe prices create \
-  --product prod_RETURNED_LIVE_ID \
-  --unit-amount AMOUNT_IN_CENTS \
-  --currency CURRENCY \
-  -d "recurring[interval]=INTERVAL" \
-  --api-key sk_live_...
+  --api-key SK_FOR_THIS_ENV
 ```
 
-After execution, capture the returned price IDs and replace the `price_TODO_*` sentinels in `create-checkout/index.ts` with the real IDs.
+Capture the returned price IDs and update the matching branch (`test` or `live`) of the `PRICES` map in `create-checkout/index.ts`, replacing the `price_TODO_*` sentinels.
 
-## Step 2.3 — Create webhook endpoints
+**If this is a subsequent environment**, mirror the product/price structure from the previous environment. Use the same product name, amounts, currency, and intervals — just a different `--api-key`. This keeps test and live configurations in sync.
 
-For each environment, create a webhook endpoint pointing at the Supabase project's edge function URL. Use the Stripe secret key that matches the environment's mode (test for staging, live for production):
+## Step 2.3 — Create webhook endpoint
+
+Create a webhook endpoint pointing at this environment's Supabase project:
 
 ```bash
 stripe webhook_endpoints create \
   --url "https://PROJECT_REF.supabase.co/functions/v1/stripe-webhook" \
   --enabled-events checkout.session.completed,customer.subscription.deleted \
-  --api-key SK_FOR_THIS_MODE
+  --api-key SK_FOR_THIS_ENV
 ```
 
 Capture the webhook signing secret (`whsec_...`) from the response — it's needed in Step 2.4.
 
-Repeat for each environment. Staging gets a test-mode endpoint, production gets a live-mode endpoint.
-
 ## Step 2.4 — Set Supabase secrets
 
-For each environment, set the edge function secrets:
+Set the edge function secrets for this environment:
 
 ```bash
 npx supabase secrets set --project-ref PROJECT_REF \
@@ -98,7 +89,24 @@ The edge functions also read these optional environment variables. Set them if t
 | `META_CAPI_ACCESS_TOKEN` | Meta Conversions API access token (if using Meta ads) |
 | `META_CAPI_PIXEL_ID` | Meta Pixel ID (if using Meta ads) |
 
-## Step 2.5 — Optional: Restricted API key hardening
+## Step 2.5 — Smoke test this environment
+
+Deploy the edge functions to this environment (see Step 7 in the main skill), then verify:
+
+1. **Checkout happy path** — open onboarding SPA, complete flow, pay with `4242 4242 4242 4242` (test mode) or a real card (live mode) → redirects to subscriber app
+2. **Webhook fires** — check Stripe dashboard (Developers → Webhooks → endpoint) for `200 OK`; check Supabase function logs for errors
+3. **DB state** — `users` row has `subscription_status = 'active'`, `stripe_customer_id` starts with `cus_`
+4. **Billing portal** — log into subscriber app, click "Manage billing" → portal loads
+5. **Cancel webhook** — cancel in portal → `subscription_status = 'cancelled'` in DB
+6. **Duplicate blocked** — fresh incognito session, same email → `account_exists` error
+
+Only after all six pass should you proceed to the next environment (or to production use if this is the only/last environment).
+
+**Then go back to Step 2.2 for the next environment**, if there is one.
+
+---
+
+## Optional: Restricted API key hardening
 
 Stripe does not support programmatic creation of Restricted API Keys (RAKs) — this is a manual dashboard step.
 
@@ -120,7 +128,7 @@ npx supabase secrets set --project-ref PROJECT_REF \
 
 This is optional. The full secret key works correctly and is only exposed server-side in Supabase edge functions. RAKs reduce blast radius if a key is ever compromised.
 
-## Step 2.6 — Local development (reference only)
+## Local development (reference only)
 
 This section is not automated. Use it when actively developing and testing webhooks locally.
 
@@ -139,16 +147,3 @@ Test card numbers:
 - `4000 0000 0000 9995` — declined (insufficient funds)
 - `4000 0025 0000 3155` — requires 3DS authentication
 - Any future expiry, any CVC, any postal code
-
-## Smoke test checklist
-
-After provisioning an environment, deploy (Step 7 in main skill) and verify:
-
-1. **Checkout happy path** — open onboarding SPA, complete flow, pay with `4242...` → redirects to subscriber app
-2. **Webhook fires** — check Stripe dashboard (Developers → Webhooks → endpoint) for `200 OK`; check Supabase function logs for errors
-3. **DB state** — `users` row has `subscription_status = 'active'`, `stripe_customer_id` starts with `cus_`
-4. **Billing portal** — log into subscriber app, click "Manage billing" → portal loads
-5. **Cancel webhook** — cancel in portal → `subscription_status = 'cancelled'` in DB
-6. **Duplicate blocked** — fresh incognito session, same email → `account_exists` error
-
-Only after all six pass should you promote to the next environment.
