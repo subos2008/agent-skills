@@ -101,7 +101,7 @@ serve(async (req) => {
 
       const stripeEnv = stripeSecretKey.startsWith('sk_live_') ? 'live' : 'test'
       const stripe = new Stripe(stripeSecretKey, {
-        apiVersion: '2023-08-16',
+        apiVersion: '2026-03-25',
         httpClient: Stripe.createFetchHttpClient(),
       })
 
@@ -237,7 +237,7 @@ serve(async (req) => {
       }
 
       const stripe = new Stripe(stripeSecretKey, {
-        apiVersion: '2023-08-16',
+        apiVersion: '2026-03-25',
         httpClient: Stripe.createFetchHttpClient(),
       })
       const supabase = createClient(supabaseUrl, supabaseServiceRoleKey)
@@ -432,7 +432,7 @@ serve(async (req) => {
       }
 
       const stripe = new Stripe(stripeSecretKey, {
-        apiVersion: '2023-08-16',
+        apiVersion: '2026-03-25',
         httpClient: Stripe.createFetchHttpClient(),
       })
 
