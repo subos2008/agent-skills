@@ -7,6 +7,7 @@ Personal collection of [Claude Code](https://docs.claude.com/en/docs/claude-code
 | Skill | Purpose |
 |-------|---------|
 | `spa-aws-deploy` | Set up AWS deployment infrastructure for React/Vite SPAs backed by Supabase: Terraform modules (S3, CloudFront, Route 53, ACM), per-app + smart parallel deploy scripts, and a GitHub Actions CI/CD pipeline. |
+| `stripe-checkout-supabase` | Install Stripe subscription checkout into a React/Vite SPA + Supabase project: three Deno edge functions (create-checkout, stripe-webhook, create-portal-session), DB migration, frontend hooks, and Stripe dashboard setup checklist. |
 
 ## Install
 
@@ -40,12 +41,20 @@ agent-skills/
 │   ├── plugin.json         # Plugin metadata
 │   └── marketplace.json    # Single-plugin marketplace pointing at "."
 ├── skills/
-│   └── spa-aws-deploy/
+│   ├── spa-aws-deploy/
+│   │   ├── SKILL.md
+│   │   └── references/
+│   │       ├── terraform.md
+│   │       ├── deploy-scripts.md
+│   │       └── github-actions.md
+│   └── stripe-checkout-supabase/
 │       ├── SKILL.md
 │       └── references/
-│           ├── terraform.md
-│           ├── deploy-scripts.md
-│           └── github-actions.md
+│           ├── database.md
+│           ├── edge-functions.md
+│           ├── frontend-integration.md
+│           ├── shared-helpers.md
+│           └── setup-checklist.md
 ├── LICENSE
 └── README.md
 ```
