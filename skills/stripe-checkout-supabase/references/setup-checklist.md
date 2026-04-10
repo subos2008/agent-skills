@@ -85,6 +85,19 @@ npx supabase secrets set --project-ref PROJECT_REF \
 
 Never commit `sk_live_*` or `whsec_*` values to git.
 
+### Optional secrets
+
+The edge functions also read these optional environment variables. Set them if the project uses these features:
+
+| Secret | Purpose |
+|--------|---------|
+| `SB_JWT_ISSUER` | Override the JWT issuer if it differs from `${SUPABASE_URL}/auth/v1` |
+| `SENTRY_DSN_CREATE_CHECKOUT` | Sentry DSN for create-checkout (per function) |
+| `SENTRY_DSN_STRIPE_WEBHOOK` | Sentry DSN for stripe-webhook |
+| `SENTRY_DSN_PORTAL` | Sentry DSN for create-portal-session |
+| `META_CAPI_ACCESS_TOKEN` | Meta Conversions API access token (if using Meta ads) |
+| `META_CAPI_PIXEL_ID` | Meta Pixel ID (if using Meta ads) |
+
 ## Step 2.5 — Optional: Restricted API key hardening
 
 Stripe does not support programmatic creation of Restricted API Keys (RAKs) — this is a manual dashboard step.

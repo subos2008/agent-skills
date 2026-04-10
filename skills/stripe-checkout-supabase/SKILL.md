@@ -1,6 +1,6 @@
 ---
 name: stripe-checkout-supabase
-description: Install Stripe subscription checkout into a React/Vite SPA + Supabase project. Creates three Deno edge functions (create-checkout, stripe-webhook, create-portal-session), a database migration for subscription state, frontend hooks for onboarding and subscriber apps, and the Stripe dashboard setup checklist. Use when the user wants to add paid subscriptions, Stripe checkout, a billing portal, or recurring payments to a Supabase-backed SPA — or mentions adding Stripe to an onboarding flow, wiring a webhook, gating users on subscription status, or "making money" from their app. Also use when scaffolding a new project that follows the dinner-matcher / comejoinus architecture.
+description: Install Stripe subscription checkout into a React/Vite SPA + Supabase project. Creates three Deno edge functions (create-checkout, stripe-webhook, create-portal-session), a database migration for subscription state, frontend hooks for onboarding and subscriber apps, and CLI-driven environment provisioning (Stripe products, prices, webhooks, secrets via Stripe CLI and Supabase CLI). Use when the user wants to add paid subscriptions, Stripe checkout, a billing portal, or recurring payments to a Supabase-backed SPA — or mentions adding Stripe to an onboarding flow, wiring a webhook, gating users on subscription status, or "making money" from their app. Also use when scaffolding a new project that follows the dinner-matcher / comejoinus architecture.
 ---
 
 # Stripe Checkout on Supabase
