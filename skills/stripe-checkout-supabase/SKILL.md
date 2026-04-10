@@ -32,7 +32,7 @@ Stripe Checkout session            Stripe Billing Portal
                              fire Meta CAPI Purchase (optional)
 ```
 
-Three edge functions, one migration, a couple of React hooks, and some dashboard clicks. The full code is in `references/` — this file is the guide.
+Three edge functions, one migration, and a couple of React hooks. The full code is in `references/` — this file is the guide. Setup has two phases: Phase 1 generates the code (Steps 1–5), Phase 2 provisions Stripe and Supabase environments via CLI (Step 6).
 
 ## What gets created
 
@@ -138,17 +138,26 @@ Read `references/frontend-integration.md` for the React hooks. Two pieces:
 
 Both hooks use `supabase.functions.invoke()` which automatically attaches the user's JWT.
 
-## Step 6: Stripe dashboard setup
+## Step 6: Environment provisioning (Phase 2)
 
-Read `references/setup-checklist.md` for the clickthrough. Summary:
+Read `references/setup-checklist.md` for the full interactive flow. This step uses the Stripe CLI and Supabase CLI to create Stripe objects and wire credentials — no dashboard clickops needed.
 
-1. Create product(s) in Stripe dashboard — one product per subscription offering. For plan variants (1m/3m/6m), attach multiple recurring prices to the same product.
-2. Copy each price ID into the `PRICES` map in `create-checkout/index.ts`. Use separate maps for test and live.
-3. Create a webhook endpoint pointing at `https://<project>.supabase.co/functions/v1/stripe-webhook`. Subscribe to `checkout.session.completed` and `customer.subscription.deleted`. Copy the signing secret.
-4. Set edge function secrets in the Supabase dashboard: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `SUBSCRIBER_APP_URL`, `ONBOARDING_APP_URL`. (Staging and production projects get their own secrets.)
-5. For local testing: `stripe listen --forward-to localhost:54321/functions/v1/stripe-webhook`. Use test mode card `4242 4242 4242 4242`.
+**Phase 2 is independent of Phase 1** — it can run immediately after code generation, or later when the user has their Stripe keys ready. It can also be re-run to add new environments or rotate secrets.
+
+Summary of what Phase 2 does:
+
+1. Collects Stripe secret keys (test + live) and Supabase project refs for each environment
+2. Creates products and prices in both test and live modes via `stripe products create` / `stripe prices create`
+3. Replaces `price_TODO_*` sentinels in `create-checkout/index.ts` with real price IDs
+4. Creates webhook endpoints via `stripe webhook_endpoints create` for each environment
+5. Sets Supabase edge function secrets via `npx supabase secrets set`
+6. Optionally guides RAK hardening (manual dashboard step — Stripe doesn't support programmatic RAK creation)
+
+For each batch of CLI commands, ask the user: "Want me to run these, or would you prefer to run them yourself?"
 
 ## Step 7: Deploy and verify
+
+After Phase 2 provisioning is complete, deploy the edge functions and run the smoke tests from `references/setup-checklist.md`.
 
 ```bash
 # Deploy migration
