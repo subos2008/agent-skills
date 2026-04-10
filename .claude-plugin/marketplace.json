@@ -10,7 +10,7 @@
       "name": "subos2008-skills",
       "source": "./",
       "description": "Personal Claude Code skills: spa-aws-deploy, stripe-checkout-supabase, and more.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "development"
     }
   ]

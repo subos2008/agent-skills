@@ -1,7 +1,7 @@
 {
   "name": "subos2008-skills",
   "description": "Personal collection of Claude Code skills. Includes: spa-aws-deploy (AWS hosting for React/Vite SPAs with Supabase), stripe-checkout-supabase (Stripe subscription checkout on Supabase edge functions).",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "subos2008"
   }
