@@ -21,7 +21,7 @@ Step 6 of the installer scans the target SPA for likely event hook points and pr
 
 **Ripgrep command:**
 ```bash
-rg -n --type=tsx --type=ts "onSubmit=\{" src/
+rg -n --type=ts "onSubmit=\{" src/
 ```
 
 **When to use `trackLead()` vs `trackEvent('form_submitted')`**: `Lead` is a Meta standard event reserved for contact/signup forms where the user intent is "I'm interested." For every form, propose both if the form is in a top-of-funnel path (welcome screen, contact page); propose only `trackEvent` for utility forms (profile edit, settings).
@@ -37,7 +37,7 @@ rg -n --type=tsx --type=ts "onSubmit=\{" src/
 
 **Ripgrep command:**
 ```bash
-rg -n --type=tsx --type=ts "create-checkout|stripe.*checkout.sessions" src/
+rg -n --type=ts "create-checkout|stripe.*checkout.sessions" src/
 ```
 
 Skip matches inside `src/lib/` (library code, not user interactions).
@@ -51,7 +51,7 @@ Skip matches inside `src/lib/` (library code, not user interactions).
 **Ripgrep commands** (two-step: find buttons first, then filter by surrounding text):
 ```bash
 # Step 1: find all button onClick handlers
-rg -n --type=tsx "onClick=\{[^}]*\}" src/ | rg "button"
+rg -n --type=ts "onClick=\{[^}]*\}" src/ | rg "button"
 
 # Step 2: for each match, read 3 lines around it and check for CTA text
 # (the installer does this in Claude rather than shell)
@@ -69,7 +69,7 @@ rg -n --type=tsx "onClick=\{[^}]*\}" src/ | rg "button"
 
 **Ripgrep command:**
 ```bash
-rg -n --type=tsx --type=ts "supabase\.auth\.(signIn|signUp|signOut)" src/
+rg -n --type=ts "supabase\.auth\.(signIn|signUp|signOut)" src/
 ```
 
 ### P1 — Funnel step navigation
@@ -81,19 +81,19 @@ rg -n --type=tsx --type=ts "supabase\.auth\.(signIn|signUp|signOut)" src/
 
 **Ripgrep command:**
 ```bash
-rg -n --type=tsx "navigate\(['\"]/step/|setStep\(|onNext\(" src/
+rg -n --type=ts "navigate\(['\"]/step/|setStep\(|onNext\(" src/
 ```
 
 ### P2 — Engagement events (lower confidence, offer cautiously)
 
 | Grep | Signal | Suggested event |
 |---|---|---|
-| `setXEnabled\s*\(\s*true` | Toggle flipped on | `trackEvent('feature_enabled', { feature: '<name>' })` |
+| `set[A-Z][A-Za-z]+Enabled\s*\(\s*true` | Toggle flipped on (e.g. `setNotificationsEnabled(true)`) | `trackEvent('feature_enabled', { feature: '<name>' })` |
 | `\.update\(\s*\{[^}]*opted_in:\s*true` | Database opt-in write | `trackEvent('opted_in')` |
 
 **Ripgrep command:**
 ```bash
-rg -n --type=tsx --type=ts "opted_in|opt_in" src/
+rg -n --type=ts "opted_in|opt_in" src/
 ```
 
 These P2 patterns often produce false positives — skip by default unless the user confirms.
