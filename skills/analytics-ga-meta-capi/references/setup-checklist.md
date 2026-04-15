@@ -53,6 +53,8 @@ supabase secrets set META_PIXEL_ID=1234567890123456 --project-ref <production-re
 
 ### 4. Deploy the edge functions with the new secrets
 
+- [ ] Run the commands below for staging, then production:
+
 ```bash
 npx supabase functions deploy create-checkout --project-ref <staging-ref>
 npx supabase functions deploy stripe-webhook --project-ref <staging-ref>
@@ -92,7 +94,7 @@ Once staging is verified:
 - [ ] Deploy the SPA to production
 - [ ] Open the live URL in an incognito window
 - [ ] Repeat the browser smoke test (devtools → Network → filter `gtag|facebook.net`)
-- [ ] Run a real Stripe transaction with a small amount (or use Stripe's `tok_visa` in live mode if available for your account)
+- [ ] Run a real Stripe transaction with a small amount, then refund it afterwards (`tok_visa` only works in test mode, not live)
 - [ ] Watch Events Manager for the dedup indicator on the production pixel
 
 ## Compliance note
