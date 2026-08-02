@@ -27,7 +27,10 @@ APP_DIR="$SCRIPT_DIR"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 APP_NAME="$(basename "$APP_DIR")"
 
-# Read Terraform outputs (no API calls — just reads local state)
+# Read Terraform outputs. With the S3 backend this IS an API call, but it uses
+# the profile pinned in the backend block (the Terraform/root identity), not the
+# deploy profile exported below — which is why the deploy IAM user needs no
+# access to the state bucket. Keep these reads above that export.
 tf_out() { terraform -chdir="$REPO_ROOT/terraform" output -raw "$1"; }
 
 if [[ "$ENV" == "staging" ]]; then
@@ -48,18 +51,28 @@ echo "==> Building $APP_NAME ($ENV)"
 cd "$APP_DIR"
 npm run build -- --mode "$ENV"
 
-echo "==> Syncing to s3://$BUCKET_NAME"
+# Upload order matters. Hashed assets FIRST: the live index.html still
+# references the PREVIOUS build's asset URLs until it is replaced, so both
+# generations have to be present at every instant.
+echo "==> Syncing assets to s3://$BUCKET_NAME"
 aws s3 sync "$APP_DIR/dist" "s3://$BUCKET_NAME" \
-  --delete \
+  --exclude "index.html" \
   --cache-control "max-age=300"
 
-# index.html must NOT be cached — always serve fresh HTML.
-# Static assets have hashed filenames so they're safe to cache.
-echo "==> Setting index.html cache headers"
-aws s3 cp "s3://$BUCKET_NAME/index.html" "s3://$BUCKET_NAME/index.html" \
+# index.html LAST, and never cached. It is the document that points at
+# everything else, so publishing it early serves a page referencing a build
+# that is not fully uploaded.
+echo "==> Uploading index.html (no-cache)"
+aws s3 cp "$APP_DIR/dist/index.html" "s3://$BUCKET_NAME/index.html" \
   --content-type "text/html" \
-  --cache-control "no-cache" \
-  --metadata-directive REPLACE
+  --cache-control "no-cache"
+
+# Deliberately NO --delete. Removing the previous build's hashed assets strands
+# any open tab or service worker still requesting them — and with the SPA's
+# 403/404 -> /index.html rewrite, those requests come back as HTML with HTTP 200
+# in place of a .js file, which surfaces as a syntax error rather than an honest
+# 404. Prune deliberately, once no old clients remain:
+#   aws s3 sync "$APP_DIR/dist" "s3://$BUCKET_NAME" --delete --size-only
 
 echo "==> Invalidating CloudFront ($DISTRIBUTION_ID)"
 INVALIDATION_ID="$(aws cloudfront create-invalidation \
@@ -81,9 +94,10 @@ echo "==> Done. $APP_NAME deployed to $ENV."
 - **`set -euo pipefail`**: Fail fast on errors, undefined vars, and pipe failures.
 - **`tf_out` reads Terraform outputs**: Single source of truth. If you change the bucket name in Terraform, deploy scripts pick it up automatically.
 - **`VITE_GIT_HASH`**: Injected into the build so the SPA can render `<meta name="version">`. Smart deploy uses this for change detection.
-- **`aws s3 sync --delete`**: Removes files in S3 that don't exist locally — keeps the bucket clean.
+- **Upload order — assets first, `index.html` last**: `index.html` names the asset files for that build. Publish it before the assets it references and every visitor in that window loads a page pointing at files that aren't there yet. A single `sync` gives no ordering guarantee, so the two steps are separated.
+- **No `--delete` on a routine deploy**: it removes the *previous* build's hashed assets the moment the new ones land, stranding open tabs and service workers that are still requesting them. Combined with the SPA's 403/404 → `/index.html` rewrite, those requests return HTML with HTTP 200 where a `.js` file should be — a syntax error in the console instead of a clean 404, which is considerably harder to diagnose. Prune as a separate deliberate step.
 - **`--cache-control max-age=300`**: 5-minute cache for static assets (their filenames are hashed, so this is safe).
-- **index.html `no-cache`**: HTML must always be fresh, otherwise users get old asset references after a deploy.
+- **index.html `no-cache`**: HTML must always be fresh, otherwise users get old asset references after a deploy. Note the upload is local→S3, i.e. a `PutObject`, so `--cache-control` applies directly and `--metadata-directive REPLACE` is not needed — that flag is only required when copying S3→S3.
 - **`wait invalidation-completed`**: Don't return until CloudFront has actually purged its cache. Otherwise the deploy looks complete but users might still see the old version.
 
 ## Script: full deploy (`deploy-all.sh`)
