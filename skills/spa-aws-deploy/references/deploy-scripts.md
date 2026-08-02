@@ -67,6 +67,21 @@ aws s3 cp "$APP_DIR/dist/index.html" "s3://$BUCKET_NAME/index.html" \
   --content-type "text/html" \
   --cache-control "no-cache"
 
+# Optional optimisation: if your bundler fingerprints asset filenames (Vite
+# does — dist/assets/*), those files are immutable by construction, so a URL
+# always returns the same bytes. Caching them for a year instead of five minutes
+# stops browsers revalidating them on every navigation. Split the sync in two:
+#
+#   aws s3 sync "$APP_DIR/dist/assets" "s3://$BUCKET_NAME/assets" \
+#     --cache-control "public,max-age=31536000,immutable"
+#   aws s3 sync "$APP_DIR/dist" "s3://$BUCKET_NAME" \
+#     --exclude "index.html" --exclude "assets/*" \
+#     --cache-control "max-age=300"
+#
+# Keep everything unhashed on the SHORT max-age. Files copied straight from
+# public/ (favicon, app icons) have stable URLs, so `immutable` would pin a
+# changed icon in browsers that already loaded the site — effectively forever.
+
 # Deliberately NO --delete. Removing the previous build's hashed assets strands
 # any open tab or service worker still requesting them — and with the SPA's
 # 403/404 -> /index.html rewrite, those requests come back as HTML with HTTP 200
@@ -96,7 +111,7 @@ echo "==> Done. $APP_NAME deployed to $ENV."
 - **`VITE_GIT_HASH`**: Injected into the build so the SPA can render `<meta name="version">`. Smart deploy uses this for change detection.
 - **Upload order — assets first, `index.html` last**: `index.html` names the asset files for that build. Publish it before the assets it references and every visitor in that window loads a page pointing at files that aren't there yet. A single `sync` gives no ordering guarantee, so the two steps are separated.
 - **No `--delete` on a routine deploy**: it removes the *previous* build's hashed assets the moment the new ones land, stranding open tabs and service workers that are still requesting them. Combined with the SPA's 403/404 → `/index.html` rewrite, those requests return HTML with HTTP 200 where a `.js` file should be — a syntax error in the console instead of a clean 404, which is considerably harder to diagnose. Prune as a separate deliberate step.
-- **`--cache-control max-age=300`**: 5-minute cache for static assets (their filenames are hashed, so this is safe).
+- **`--cache-control max-age=300`**: 5-minute cache for static assets (their filenames are hashed, so this is safe). Fingerprinted assets can go further — `max-age=31536000, immutable` — since the URL changes whenever the bytes do; see the split-sync note in the script. Apply that only to hashed files: anything copied verbatim from `public/` keeps a stable URL, and `immutable` would strand a changed favicon or app icon in every browser that had already loaded the site.
 - **index.html `no-cache`**: HTML must always be fresh, otherwise users get old asset references after a deploy. Note the upload is local→S3, i.e. a `PutObject`, so `--cache-control` applies directly and `--metadata-directive REPLACE` is not needed — that flag is only required when copying S3→S3.
 - **`wait invalidation-completed`**: Don't return until CloudFront has actually purged its cache. Otherwise the deploy looks complete but users might still see the old version.
 
