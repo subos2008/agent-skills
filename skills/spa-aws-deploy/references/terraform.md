@@ -2,7 +2,84 @@
 
 Complete templates for the Terraform infrastructure. Replace placeholders in `{CURLY_BRACES}` with project-specific values.
 
-## File: `terraform/providers.tf`
+## Root layout: two roots, split by who applies them
+
+```
+terraform/
+  iam/                 # applied by ADMIN, rarely. Creates the two IAM users.
+  clusters/<env>/      # applied by the TERRAFORM USER. Everything else.
+  modules/
+    environment/       # per-env: ACM cert + DNS validation + SPA loop
+    spa/               # one S3 bucket + CloudFront + Route 53 record
+    homepage/          # apex domain + www redirect (optional)
+```
+
+The split is the credential model, expressed as directories. `iam/` creates the
+Terraform user and the deploy user, so nothing smaller than admin can apply it —
+and it is applied about twice in a project's life. `clusters/` is applied
+routinely by the Terraform user, whose policy grants **no IAM**, so the key used
+every week cannot widen its own permissions.
+
+Pin the identity in each root's backend block rather than relying on
+`AWS_PROFILE`, so applying the wrong root with the wrong credentials fails
+instead of half-working:
+
+```hcl
+# terraform/iam/backend.tf
+terraform {
+  backend "s3" {
+    bucket  = "{PROJECT}-tfstate-{ACCOUNT_ID}"
+    key     = "iam/terraform.tfstate"
+    region  = "{REGION}"
+    encrypt = true
+    profile = "{PROJECT}-admin"      # admin only
+  }
+}
+```
+
+```hcl
+# terraform/clusters/{ENV}/backend.tf — same bucket, different key and profile
+terraform {
+  backend "s3" {
+    bucket  = "{PROJECT}-tfstate-{ACCOUNT_ID}"
+    key     = "clusters/{ENV}/terraform.tfstate"
+    region  = "{REGION}"
+    encrypt = true
+    profile = "{PROJECT}-terraform"
+  }
+}
+```
+
+### How `iam/` scopes policies to buckets it does not create
+
+The obvious objection to splitting is that the deploy policy can no longer
+reference `module.production.spa_s3_bucket_arns`, and so must fall back to a
+wildcard. It does not have to. **Bucket names are deterministic** — they are
+built from project, environment, app and account id — so the IAM root can
+construct the exact ARNs itself:
+
+```hcl
+data "aws_caller_identity" "current" {}
+
+locals {
+  acct = data.aws_caller_identity.current.account_id
+
+  # Deterministic by construction (see modules/spa). Exact ARNs, written here
+  # even though this root does not create the buckets — which is what keeps the
+  # policy tightly scoped without a cross-root state read.
+  site_buckets = [
+    "arn:aws:s3:::{PROJECT}-{ENV}-app-${local.acct}",
+    "arn:aws:s3:::{PROJECT}-{ENV}-admin-${local.acct}",
+  ]
+  site_objects = [for b in local.site_buckets : "${b}/*"]
+}
+```
+
+Do not reach for `terraform_remote_state` here. It would give the IAM root read
+access to cluster state and impose an apply order between the two, to recover
+strings that are already knowable.
+
+## File: `terraform/clusters/{ENV}/providers.tf`
 
 ```hcl
 terraform {
@@ -37,7 +114,7 @@ provider "aws" {
 }
 ```
 
-## File: `terraform/variables.tf`
+## File: `terraform/clusters/{ENV}/variables.tf`
 
 ```hcl
 variable "aws_region" {
@@ -69,7 +146,7 @@ variable "stg_supabase_url" {
 }
 ```
 
-## File: `terraform/main.tf`
+## File: `terraform/clusters/{ENV}/main.tf`
 
 ```hcl
 # Look up the existing hosted zone (must be created out-of-band or imported)
@@ -162,6 +239,10 @@ module "homepage_production" {
 
 # ============================================================================
 # Deploy IAM user — used by CI/CD and local deploys
+#
+# Lives in terraform/iam/, NOT in the cluster root: it is applied by admin,
+# and a routine `terraform apply` of the clusters must not be able to touch
+# IAM at all.
 # ============================================================================
 resource "aws_iam_user" "deploy" {
   name = "{PROJECT}-deploy"
@@ -202,9 +283,114 @@ resource "aws_iam_user_policy_attachment" "deploy" {
   user       = aws_iam_user.deploy.name
   policy_arn = aws_iam_policy.deploy.arn
 }
+
+# ============================================================================
+# Terraform IAM user — applies terraform/clusters/* from a laptop or CI
+#
+# A long-lived scoped key rather than admin SSO, deliberately: SSO sessions
+# expire daily and infrastructure work happens often enough that re-login is a
+# real cost. The trade is a static credential, so this policy grants exactly
+# what the cluster roots need — and NOTHING under `iam:`, so the key cannot
+# widen its own permissions or mint another one.
+# ============================================================================
+resource "aws_iam_user" "terraform" {
+  name = "{PROJECT}-terraform"
+}
+
+resource "aws_iam_policy" "terraform" {
+  name = "{PROJECT}-terraform-policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ClusterStateOnly"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        # Note the prefix: this key cannot read or rewrite iam/terraform.tfstate,
+        # which is where its own secret lives.
+        Resource = ["arn:aws:s3:::{PROJECT}-tfstate-${local.acct}/clusters/*"]
+      },
+      {
+        Sid      = "ManageSiteBuckets"
+        Effect   = "Allow"
+        Action   = ["s3:*"]
+        Resource = concat(local.site_buckets, local.site_objects)
+      },
+      {
+        Sid      = "ManageDistributions"
+        Effect   = "Allow"
+        Action   = ["cloudfront:*", "acm:*", "route53:*"]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_user_policy_attachment" "terraform" {
+  user       = aws_iam_user.terraform.name
+  policy_arn = aws_iam_policy.terraform.arn
+}
+
+# Both keys are created here and land in THIS root's state, which only admin can
+# read — so the privileged layer mints the credentials and the layers that use
+# them never can.
+resource "aws_iam_access_key" "deploy" {
+  user = aws_iam_user.deploy.name
+}
+
+resource "aws_iam_access_key" "terraform" {
+  user = aws_iam_user.terraform.name
+}
 ```
 
-## File: `terraform/outputs.tf`
+## Artefacts: never let a build version reach Terraform state
+
+Most projects that use this skill eventually add a Lambda. The naive template
+points the function at a local zip:
+
+```hcl
+# DON'T
+resource "aws_lambda_function" "api" {
+  filename         = "${path.module}/../backend/dist/api.zip"
+  source_code_hash = filebase64sha256("${path.module}/../backend/dist/api.zip")
+}
+```
+
+That makes Terraform the owner of the application code, and the failure is worse
+than a noisy plan: **`terraform apply` on a machine where `dist/api.zip` is stale
+or unbuilt will happily deploy that zip**, silently rolling the running function
+back. An infrastructure change reverts the software. It also means `terraform
+plan` cannot be trusted after a build, and the running version lives in state.
+
+Point the function at S3 instead, and let deploys update the object:
+
+```hcl
+resource "aws_s3_object" "api" {
+  bucket = aws_s3_bucket.artifacts.id
+  key    = "api.zip"
+  source = "${path.module}/../backend/dist/api.zip"
+  etag   = filemd5("${path.module}/../backend/dist/api.zip")
+
+  # Seed only. Deploys overwrite this object via the CLI, and Terraform must
+  # not treat that as drift to correct.
+  lifecycle {
+    ignore_changes = [etag, source]
+  }
+}
+
+resource "aws_lambda_function" "api" {
+  s3_bucket = aws_s3_bucket.artifacts.id
+  s3_key    = aws_s3_object.api.key
+  # No s3_object_version: pinning one would put the build back into state.
+}
+```
+
+A deploy is then `aws s3 cp` followed by `aws lambda update-function-code
+--s3-bucket … --s3-key …`, exactly parallel to the SPA's `s3 sync` +
+invalidation. The software is a separate asset from the infrastructure, and
+`terraform apply` stays out of the deploy path.
+
+## File: `terraform/clusters/{ENV}/outputs.tf`
 
 These outputs are consumed by deploy scripts via `terraform output -raw <key>`.
 

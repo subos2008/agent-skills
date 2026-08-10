@@ -106,6 +106,39 @@ echo "==> Done. $APP_NAME deployed to $ENV."
 
 ### Why each step matters
 
+### The credential model
+
+Two identities are in play in one script, and the split is deliberate:
+
+- **`terraform output` uses the Terraform profile**, because the backend block
+  pins `profile = "…"`. That holds regardless of `AWS_PROFILE`. With an S3
+  backend this read *is* a real `GetObject` — the deploy IAM user simply never
+  performs it.
+- **Everything after `export AWS_PROFILE` uses the deploy profile**: `s3 sync`
+  and `cloudfront create-invalidation`, nothing else.
+
+This is why the deploy policy grants no access to the state bucket, and why the
+Terraform reads sit above the export. Do not "fix" the deploy user by granting
+it state access, and do not assume a bare CI runner holding only deploy
+credentials can run this script unchanged — it cannot, because it has no
+Terraform profile for the state read. When deploys move to CI, publish the
+bucket and distribution values as CI variables instead.
+
+**The literals are deliberate.** Bucket names, distribution IDs, CloudFront
+hostnames, profile names and region are written plainly where a project chooses
+that shape, and account-suffixed bucket names carry the account id on purpose —
+S3 bucket names are one global namespace, and the suffix is what makes them
+unique. All of them change only when infrastructure is destroyed and recreated,
+which is not a routine operation.
+
+Two shapes are both fine: read them from `terraform output` at the top of the
+script, as the template above does, or write them literally and fill them in
+once after the first apply. Pick one. Do not invent a third — in particular, a
+generated manifest file cannot detect its own staleness, so it is strictly worse
+than either.
+
+## Why these choices
+
 - **`set -euo pipefail`**: Fail fast on errors, undefined vars, and pipe failures.
 - **`tf_out` reads Terraform outputs**: Single source of truth. If you change the bucket name in Terraform, deploy scripts pick it up automatically.
 - **`VITE_GIT_HASH`**: Injected into the build so the SPA can render `<meta name="version">`. Smart deploy uses this for change detection.

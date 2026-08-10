@@ -23,17 +23,36 @@ Each SPA gets its own S3 bucket + CloudFront distribution + DNS record. Environm
 
 | Component | What | Why |
 |-----------|------|-----|
-| **Terraform modules** | `spa/`, `environment/`, `homepage/` | S3, CloudFront, Route 53, ACM certs, deploy IAM user |
+| **Terraform roots** | `iam/`, `clusters/` | Split by who applies them — see "Three identities" below |
+| **Terraform modules** | `spa/`, `environment/`, `homepage/` | S3, CloudFront, Route 53, ACM certs |
 | **Deploy scripts** | Per-app `deploy.sh` + `deploy-smart.sh` | Build, S3 sync, CloudFront invalidation, change detection |
 | **GitHub Actions** | `.github/workflows/deploy.yml` | tests -> staging -> e2e -> production -> smoke |
 | **Edge function deploys** | In CI + deploy scripts | `supabase functions deploy` integrated into pipeline |
+
+## Read these before generating anything
+
+**This page is an index. It is deliberately not enough to build from.** The skill
+is in `references/`:
+
+- `references/terraform.md` — the module and root templates, in full
+- `references/deploy-scripts.md` — deploy scripts, and the credential model
+- `references/github-actions.md` — the CI/CD pipeline
+
+Read all three before writing any file.
+
+The most common failure by far is an agent that skims this page, believes it has
+the skill, and reconstructs from the summary something subtly different — most
+expensively, running deploys under an admin role, which the credential model
+below forbids in as many words. Working implementations of this pattern are
+usually on the same disk; one read of an existing `terraform/` or `deploy.sh`
+settles more than several rounds of reasoning.
 
 ## Step 1: Gather requirements
 
 Before generating anything, ask:
 
 1. **Project name** -- used for S3 bucket prefixes, Terraform naming (e.g., `myapp`)
-2. **Domain** -- e.g., `myapp.com`
+2. **Domain** -- e.g., `myapp.com`. **"None yet" is a supported answer** — see "Phase 1: no domain yet"
 3. **SPAs** -- names and subdomains:
    - Is there a homepage at the apex domain? (`myapp.com`)
    - Other SPAs? e.g., `app` -> `app.myapp.com`, `admin` -> `admin.myapp.com`
@@ -46,22 +65,25 @@ Before generating anything, ask:
 
 ## Step 2: Terraform infrastructure
 
-Read `references/terraform.md` for complete module templates. Generate the following structure:
-
-```
-terraform/
-  main.tf              # Environments, homepage, deploy IAM user, state config
-  providers.tf         # AWS primary region + us-east-1 alias (for ACM)
-  variables.tf         # Root input variables
-  outputs.tf           # CF distribution IDs + S3 bucket names (consumed by deploy scripts)
-  terraform.tfvars     # (gitignored) Actual secret values
-  modules/
-    environment/       # Per-env: ACM cert + DNS validation + SPA loop
-    spa/               # Reusable: one S3 bucket + CloudFront + Route 53 record
-    homepage/          # Special: apex domain + www redirect (if needed)
-```
+**Templates and the root layout: `references/terraform.md`.** Generate from
+there, not from this page.
 
 ### Key design decisions to understand
+
+**Three identities, and never fewer.** Deploys run as a **deploy user** whose
+policy covers uploading build output and creating invalidations, and nothing
+else — it deliberately cannot create or delete buckets and distributions, so it
+cannot apply Terraform. Infrastructure is applied by a **Terraform user** with a
+scoped long-lived key and **no IAM permissions, so it cannot widen itself**. Only
+the bootstrap root that creates those two users runs as an **admin** identity,
+and it is applied rarely and by hand.
+
+That split is why there are two Terraform roots: `iam/` (admin-applied, creates
+the users and holds their keys in its own state) and `clusters/` (Terraform-user
+applied, everything else). Never use admin credentials for a routine deploy, and
+do not collapse the Terraform user into the admin one to save a step — the whole
+point of the middle tier is that the credential you use every week cannot grant
+itself anything.
 
 **Multi-provider for ACM**: CloudFront needs certificates in `us-east-1` regardless of where other resources live. The environment module receives both providers.
 
@@ -69,39 +91,47 @@ terraform/
 
 **S3 security**: Buckets block all public access. CloudFront authenticates via Origin Access Control (OAC), and the bucket policy only allows requests from that specific CloudFront distribution ARN.
 
-**Deploy IAM user**: A dedicated user with minimal permissions (S3 put/delete, CloudFront invalidation). CI/CD and local deploys both use this user. Never use root/admin creds for deploys.
-
 **Remote state**: S3 backend with encryption. The state bucket itself is created manually (one-time bootstrap).
 
 **Environment isolation**: Same Terraform module instantiated twice with different variables -- different bucket prefixes, domain suffixes, Supabase credentials. Staging can suppress things like email sends.
 
+**Software is not infrastructure**: a build version must never reach Terraform state. Where a project also runs Lambda, `references/terraform.md` has the pattern that keeps them separable.
+
+## Phase 1: no domain yet
+
+Every CloudFront distribution gets a free `*.cloudfront.net` hostname with
+working HTTPS, so a site can be live and inspectable before a domain exists.
+This is the normal starting state for a new project, not an edge case — an
+acquirer, a reviewer or a founder checking staging does not need it on its final
+hostname, and waiting on a brand decision to get anything deployed is a bad
+trade.
+
+To do it:
+
+- Skip the `environment` and `homepage` modules. The `environment` module's body
+  is an ACM certificate plus DNS validation wrapping a `for_each` over SPAs; with
+  no domain it collapses to the loop, so the root instantiates `modules/spa`
+  directly.
+- In `modules/spa`, replace the `viewer_certificate` block with
+  `cloudfront_default_certificate = true`, and drop `aliases`.
+- Drop the `aws.us_east_1` provider alias — it exists only for ACM.
+- Drop the Route 53 record and the `hosted_zone_id` / `dns_name` variables.
+
+Phase 2 attaches a certificate and DNS alias to the **same** distributions.
+Nothing is recreated, so this is a genuine phase rather than throwaway work.
+
 ## Step 3: Deploy scripts
 
-Read `references/deploy-scripts.md` for templates. Create:
+**Templates, the credential model, and the cache and upload-ordering rules:
+`references/deploy-scripts.md`.** Several of those rules exist because of
+specific production failures and are not derivable — read them.
 
-### Per-SPA deploy script (`web-apps/{name}/deploy.sh`)
-
-Each SPA gets an identical deploy script that:
-1. Reads bucket name + CloudFront distribution ID from `terraform output`
-2. Builds with `npm run build -- --mode $ENV` (Vite loads `.env.$ENV`)
-3. Syncs to S3 with `--delete` and 5-minute cache
-4. Overrides `index.html` to `no-cache` (HTML is always fresh, assets are cached)
-5. Creates CloudFront invalidation and waits for completion
-
-This `terraform output` approach means deploy scripts never hardcode AWS resource IDs -- Terraform is the single source of truth.
-
-### Smart deploy (`deploy-smart.sh`)
-
-An orchestrator that only redeploys what changed:
-1. Curls each deployed app's `<meta name="version">` tag
-2. Compares to current `git rev-parse --short HEAD`
-3. Skips apps already at HEAD
-4. Deploys changed apps + edge functions in parallel
-5. Reports what was deployed/skipped and total time
+Two scripts are generated: a per-SPA `deploy.sh`, and a `deploy-smart.sh` that
+skips apps already at `HEAD`.
 
 ### Version tracking
 
-Inject git hash into builds: `VITE_GIT_HASH=$(git rev-parse --short HEAD)`. Render as `<meta name="version" content="...">` in index.html. This enables smart deploy's change detection.
+Inject git hash into builds: `VITE_GIT_HASH=$(git rev-parse --short HEAD)`. Render as `<meta name="version" content="...">` in index.html. This is what smart deploy compares, and what makes a deployed build identifiable in a bug report.
 
 ## Step 4: Environment configuration
 
@@ -125,7 +155,7 @@ npm run build -- --mode production  # loads .env.production
 
 ## Step 5: GitHub Actions CI/CD
 
-Read `references/github-actions.md` for the workflow template. The pipeline:
+**Workflow template: `references/github-actions.md`.** The pipeline:
 
 ```
 push to master
@@ -133,23 +163,9 @@ push to master
   unit-tests ----> deploy-staging ----> e2e-tests ----> deploy-production ----> smoke-tests
 ```
 
-### Key patterns
-
-**Concurrency**: One deployment at a time, queued not cancelled:
-```yaml
-concurrency: { group: deploy, cancel-in-progress: false }
-```
-
-**Environment separation**: GitHub Environments scope secrets per env. Staging secrets differ from production.
-
-**Deploy order**: Migrations -> edge functions -> SPAs (functions may depend on new schema).
-
-**Production env files**: Written from secrets at deploy time, not committed:
-```yaml
-- run: echo "${{ secrets.PROD_APP_ENV }}" > web-apps/app/.env.production
-```
-
-**CloudFront invalidation**: Each SPA deploy creates an invalidation and waits for it to complete before the job finishes.
+One deployment at a time, queued rather than cancelled; secrets scoped per
+GitHub Environment; migrations before edge functions before SPAs. The reference
+has the reasons and the exact YAML.
 
 ## Step 6: Supabase edge functions
 
@@ -167,12 +183,14 @@ Migrations run first: `npx supabase link --project-ref $REF && npx supabase db p
 After generating all files, walk the user through:
 
 1. Create S3 bucket for Terraform state (manual, one-time bootstrap)
-2. `terraform init` to initialize
-3. Create or import Route 53 hosted zone, update domain registrar nameservers
-4. `terraform plan` -- review, then `terraform apply`
-5. Create IAM access keys for the deploy user Terraform created
+2. Apply `terraform/iam` **as the admin identity** — this creates the Terraform
+   and deploy users and outputs their access keys into that root's state
+3. Configure local AWS profiles for both users from those outputs
+4. Apply `terraform/clusters/*` **as the Terraform user**
+5. Create or import Route 53 hosted zone, update domain registrar nameservers
+   (skip for Phase 1 — no domain yet)
 6. Set up GitHub secrets:
-   - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (from deploy user)
+   - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (from the **deploy** user)
    - `SUPABASE_ACCESS_TOKEN` (from Supabase dashboard)
    - Per-environment: `PROD_{APP}_ENV` with full .env.production contents
 7. Create GitHub Environments: `staging`, `production`
